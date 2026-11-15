@@ -17,28 +17,24 @@ An animated ASCII-art screensaver for GNOME. Your text in big figlet letters on 
 
 ## Install
 
-You need GNOME Shell 45 or newer and Python 3.8+. On Debian/Ubuntu, also run `sudo apt install python3-venv`.
+One command:
 
 ```bash
-git clone https://github.com/Chanevan317/Glyph-Screensaver.git
-cd Glyph-Screensaver
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/Chanevan317/Glyph-Screensaver/main/install.sh | bash
 ```
 
-Log out and back in, then enable it:
+If it asks you to, log out and back in. That's it: Glyph Screensaver then shows up in Extension Manager like any other extension.
 
-```bash
-gnome-extensions enable glyph-screensaver@Chanevan317
-```
+You need GNOME Shell 45 or newer and Python 3.8+. On Debian/Ubuntu, run `sudo apt install python3-venv` first.
 
-Installed it from extensions.gnome.org instead? Set up the animation engine once, then log out and back in:
+Installed it from Extension Manager or extensions.gnome.org? Run the same command once to set up the animation engine; the extension's settings remind you if it's missing.
 
-```bash
-python3 -m venv ~/.local/share/glyph-screensaver/venv
-~/.local/share/glyph-screensaver/venv/bin/pip install "terminaltexteffects>=0.15,<0.16" pyfiglet
-```
+<details>
+<summary>What the command does</summary>
 
-`install.sh` puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private virtualenv at `~/.local/share/glyph-screensaver/venv` and installs the extension.
+It puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private virtualenv at `~/.local/share/glyph-screensaver/venv`, installs the latest release of the extension (unless it's already installed), and enables it. Nothing is installed system-wide and no `sudo` is used. Running `./install.sh` from a clone installs that checkout instead.
+
+</details>
 
 ## Settings
 

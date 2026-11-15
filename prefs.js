@@ -7,9 +7,10 @@ import GLib from 'gi://GLib';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {TerminalGrid} from './renderer.js';
-import {findPython, displayText, VENV} from './common.js';
+import {findPython, displayText} from './common.js';
 
 const PYTHON = findPython() ?? 'python3';
+const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/Chanevan317/Glyph-Screensaver/main/install.sh | bash';
 
 // Keep in sync with STYLES in helper/tte_stream.py
 const STYLES = [
@@ -66,7 +67,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         const warn = new Adw.PreferencesGroup({visible: false});
         warn.add(new Adw.ActionRow({
             title: 'Animation engine not installed',
-            subtitle: `Needs terminaltexteffects and pyfiglet. Run this in a terminal, then reopen settings:\npython3 -m venv ${VENV} && ${VENV}/bin/pip install "terminaltexteffects>=0.15,<0.16" pyfiglet`,
+            subtitle: `Run this once in a terminal, then reopen settings:\n${INSTALL_CMD}`,
             subtitle_selectable: true,
             css_classes: ['error'],
         }));
