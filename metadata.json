@@ -1,0 +1,9 @@
+{
+  "uuid": "glyph-screensaver@Chanevan317",
+  "name": "Glyph Screensaver",
+  "description": "An animated ASCII-art screensaver inspired by Omarchy: your text in big figlet letters on a pure black screen, brought to life by terminaltexteffects. Starts when you're idle; any key or mouse movement dismisses it.\n\nRequires Python 3 with terminaltexteffects and pyfiglet; see the project page for the one-line setup.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.glyph-screensaver",
+  "url": "https://github.com/Chanevan317/Glyph-Screensaver",
+  "version-name": "1.0"
+}
