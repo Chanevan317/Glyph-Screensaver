@@ -5,7 +5,17 @@ import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import Cairo from 'cairo';
 
-export const MONO = 'Adwaita Mono';
+// Adwaita fonts ship with GNOME 48+; older releases and other distros fall back to the generic family.
+function pickFamily(preferred, generic) {
+    try {
+        const families = PangoCairo.FontMap.get_default().list_families();
+        if (families.some(f => f.get_name() === preferred))
+            return preferred;
+    } catch (e) {}
+    return generic;
+}
+export const MONO = pickFamily('Adwaita Mono', 'Monospace');
+export const SANS = pickFamily('Adwaita Sans', 'Sans');
 const DEFAULT_FG = [0.88, 0.88, 0.88];
 
 const QUADS = { // [UL, UR, LL, LR]
@@ -90,9 +100,12 @@ function builtinPath(cr, cp, x0, y0, x1, y1) {
 }
 
 export class TerminalGrid {
-    /** Cell metrics like a terminal: font size in points -> pixels at 96 dpi. */
-    constructor(fontSizePt, width, height) {
-        const px = fontSizePt * 96 / 72;
+    /**
+     * Cell metrics like a terminal: font size in points -> pixels at 96 dpi.
+     * `scale` is the UI scale when width/height are physical pixels (X11 HiDPI); 1 otherwise.
+     */
+    constructor(fontSizePt, width, height, scale = 1) {
+        const px = fontSizePt * 96 / 72 * scale;
         const surf = new Cairo.ImageSurface(Cairo.Format.ARGB32, 1, 1);
         const cr = new Cairo.Context(surf);
         cr.selectFontFace(MONO, Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);

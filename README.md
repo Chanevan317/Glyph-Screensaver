@@ -17,7 +17,7 @@ An animated ASCII-art screensaver for GNOME. Your text in big figlet letters on 
 
 ## Install
 
-You need GNOME Shell 45 or newer and Python 3.
+You need GNOME Shell 45 or newer and Python 3.8+. On Debian/Ubuntu, also run `sudo apt install python3-venv`.
 
 ```bash
 git clone https://github.com/Chanevan317/Glyph-Screensaver.git
@@ -29,6 +29,13 @@ Log out and back in, then enable it:
 
 ```bash
 gnome-extensions enable glyph-screensaver@Chanevan317
+```
+
+Installed it from extensions.gnome.org instead? Set up the animation engine once, then log out and back in:
+
+```bash
+python3 -m venv ~/.local/share/glyph-screensaver/venv
+~/.local/share/glyph-screensaver/venv/bin/pip install "terminaltexteffects>=0.15,<0.16" pyfiglet
 ```
 
 `install.sh` puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private virtualenv at `~/.local/share/glyph-screensaver/venv` and installs the extension.

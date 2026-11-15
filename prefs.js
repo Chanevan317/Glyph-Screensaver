@@ -52,7 +52,12 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
             .ss-preview { background-color: #000000; border-radius: 12px; }
             .ss-art { color: #ffffff; font-family: "Adwaita Mono", monospace; font-size: 8pt; padding: 18px; }
         `);
-        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        const display = Gdk.Display.get_default();
+        Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        window.connect('close-request', () => {
+            Gtk.StyleContext.remove_provider_for_display(display, css);
+            return false;
+        });
 
         const page = new Adw.PreferencesPage({title: 'Screensaver', icon_name: 'preferences-desktop-screensaver-symbolic'});
         window.add(page);
@@ -61,7 +66,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         const warn = new Adw.PreferencesGroup({visible: false});
         warn.add(new Adw.ActionRow({
             title: 'Animation engine not installed',
-            subtitle: `Needs terminaltexteffects and pyfiglet. Run install.sh from the project, or:\npython3 -m venv ${VENV} && ${VENV}/bin/pip install terminaltexteffects pyfiglet`,
+            subtitle: `Needs terminaltexteffects and pyfiglet. Run this in a terminal, then reopen settings:\npython3 -m venv ${VENV} && ${VENV}/bin/pip install "terminaltexteffects>=0.15,<0.16" pyfiglet`,
             subtitle_selectable: true,
             css_classes: ['error'],
         }));
@@ -104,7 +109,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         const refreshArt = () => {
             try {
                 const proc = Gio.Subprocess.new(
-                    [PYTHON, '-I', helper, '--render-only', '--text', displayText(settings), '--style', settings.get_string('font-style')],
+                    [PYTHON, '-I', helper, '--render-only', `--text=${displayText(settings)}`, '--style', settings.get_string('font-style')],
                     Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
                 proc.communicate_utf8_async(null, null, (p, res) => {
                     try {
@@ -243,7 +248,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         };
         try {
             proc = Gio.Subprocess.new([PYTHON, '-I', helper,
-                '--text', displayText(settings),
+                `--text=${displayText(settings)}`,
                 '--style', settings.get_string('font-style'),
                 '--cols', String(grid.cols), '--rows', String(grid.rows),
                 '--effect', name], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
@@ -263,7 +268,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
             });
             readLine();
         } catch (e) {
-            logError(e, 'glyph-screensaver preview');
+            console.error('glyph-screensaver preview:', e);
         }
         area.add_tick_callback(() => {
             if (dirty) {

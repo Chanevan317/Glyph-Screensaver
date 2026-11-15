@@ -13,11 +13,12 @@ import Cairo from 'cairo';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-import {TerminalGrid} from './renderer.js';
+import {TerminalGrid, SANS} from './renderer.js';
 import {findPython, displayText} from './common.js';
 
 const ARM_DELAY = 700;      // ms before input dismisses (so the Preview click doesn't close it)
 const MOVE_THRESHOLD = 12;  // px of mouse travel that counts as activity
+const MISSING_ENGINE = 'Glyph Screensaver needs terminaltexteffects — open the extension settings for setup.';
 
 export default class GlyphScreensaverExtension extends Extension {
     enable() {
@@ -118,7 +119,9 @@ export default class GlyphScreensaverExtension extends Extension {
         }
         this._overlay.grab_key_focus();
 
-        this._grid = new TerminalGrid(this._settings.get_uint('font-size'), monitor.width, monitor.height);
+        // On X11 HiDPI the stage is in physical pixels and St scales the UI; elsewhere this is 1.
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        this._grid = new TerminalGrid(this._settings.get_uint('font-size'), monitor.width, monitor.height, scale);
         this._message = null;
         this._area.connect('repaint', a => this._repaint(a));
         this._startHelper();
@@ -214,7 +217,7 @@ export default class GlyphScreensaverExtension extends Extension {
         const helper = GLib.build_filenamev([this.path, 'helper', 'tte_stream.py']);
         const python = findPython();
         const argv = [python, '-I', helper,
-            '--text', displayText(this._settings),
+            `--text=${displayText(this._settings)}`,  // '=' so text starting with '-' isn't read as a flag
             '--style', this._settings.get_string('font-style'),
             '--cols', String(this._grid.cols), '--rows', String(this._grid.rows),
             '--exclude', this._settings.get_strv('disabled-effects').join(',')];
@@ -223,7 +226,7 @@ export default class GlyphScreensaverExtension extends Extension {
                 throw new Error('python3 not found');
             this._proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
         } catch (e) {
-            this._message = 'Glyph Screensaver needs terminaltexteffects — open the extension settings for setup.';
+            this._message = MISSING_ENGINE;
             this._dirty = true;
             return;
         }
@@ -249,8 +252,16 @@ export default class GlyphScreensaverExtension extends Extension {
             } catch (e) {
                 return;
             }
-            if (line === null || cancel.is_cancelled() || !this._grid)
+            if (cancel.is_cancelled() || !this._grid)
                 return;
+            if (line === null) {
+                // Helper exited before animating: most likely terminaltexteffects/pyfiglet are missing.
+                if (!this._grid.effect) {
+                    this._message = MISSING_ENGINE;
+                    this._dirty = true;
+                }
+                return;
+            }
             if (this._grid.handleLine(line))
                 this._dirty = true;
             this._readLine();
@@ -263,8 +274,8 @@ export default class GlyphScreensaverExtension extends Extension {
             if (this._message) {
                 cr.setSourceRGB(0, 0, 0);
                 cr.paint();
-                cr.selectFontFace('Adwaita Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);
-                cr.setFontSize(18);
+                cr.selectFontFace(SANS, Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);
+                cr.setFontSize(18 * St.ThemeContext.get_for_stage(global.stage).scale_factor);
                 cr.setSourceRGB(0.7, 0.7, 0.7);
                 cr.moveTo(40, area.height / 2);
                 cr.showText(this._message);
@@ -272,7 +283,7 @@ export default class GlyphScreensaverExtension extends Extension {
                 this._grid.paint(cr);
             }
         } catch (e) {
-            logError(e, 'glyph-screensaver');
+            console.error('glyph-screensaver:', e);
         } finally {
             cr.$dispose();
         }

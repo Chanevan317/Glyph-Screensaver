@@ -5,7 +5,13 @@ UUID=glyph-screensaver@Chanevan317
 DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="${XDG_DATA_HOME:-$HOME/.local/share}/glyph-screensaver/venv"
 
-command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+die() { echo "Error: $*" >&2; exit 1; }
+
+command -v gnome-extensions >/dev/null || die "gnome-extensions not found. Is GNOME Shell 45 or newer installed?"
+command -v python3 >/dev/null || die "python3 is required. Install it with your package manager."
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' || die "Python 3.8 or newer is required."
+python3 -c 'import venv, ensurepip' 2>/dev/null ||
+    die "Python's venv module is missing. On Debian/Ubuntu: sudo apt install python3-venv"
 
 echo "==> Installing terminaltexteffects + pyfiglet into $VENV"
 python3 -m venv "$VENV"
