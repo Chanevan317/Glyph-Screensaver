@@ -18,6 +18,7 @@ import {findPython, displayText} from './common.js';
 
 const ARM_DELAY = 700;      // ms before input dismisses (so the Preview click doesn't close it)
 const MOVE_THRESHOLD = 12;  // px of mouse travel that counts as activity
+const WATCHDOG_MS = 3000;   // close if nothing has been painted by then
 const MISSING_ENGINE = 'Glyph Screensaver needs terminaltexteffects — open the extension settings for setup.';
 
 export default class GlyphScreensaverExtension extends Extension {
@@ -36,6 +37,16 @@ export default class GlyphScreensaverExtension extends Extension {
                 this._hide(true);
         });
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => this._hide(true));
+        // When GNOME blanks the screen (Settings → Power → Screen Blank), close and stop the engine:
+        // nobody can see the animation, so it would only burn CPU. The screen shield covers normal
+        // sessions; the monitors' power-save mode also covers sessions without one.
+        this._shieldId = Main.screenShield?.connect('active-changed', () => {
+            if (Main.screenShield.active)
+                this._hide(true);
+        }) ?? 0;
+        this._displayOff = false;
+        this._monitorManager = global.backend?.get_monitor_manager?.() ?? null;
+        this._powerId = this._monitorManager?.connect('power-save-mode-changed', () => this._checkPowerSave()) ?? 0;
         this._armIdleWatch();
     }
 
@@ -47,6 +58,11 @@ export default class GlyphScreensaverExtension extends Extension {
         this._settingsIds.forEach(id => this._settings.disconnect(id));
         Main.sessionMode.disconnect(this._sessionId);
         Main.layoutManager.disconnect(this._monitorsId);
+        if (this._shieldId)
+            Main.screenShield?.disconnect(this._shieldId);
+        if (this._powerId)
+            this._monitorManager.disconnect(this._powerId);
+        this._monitorManager = null;
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         this._settings = null;
@@ -62,6 +78,23 @@ export default class GlyphScreensaverExtension extends Extension {
         this._timeouts.add(id);
     }
 
+    // The power-save mode isn't readable from JS, so ask mutter over D-Bus (0 = displays on).
+    _checkPowerSave() {
+        Gio.DBus.session.call(
+            'org.gnome.Mutter.DisplayConfig', '/org/gnome/Mutter/DisplayConfig', 'org.freedesktop.DBus.Properties',
+            'Get', new GLib.Variant('(ss)', ['org.gnome.Mutter.DisplayConfig', 'PowerSaveMode']),
+            new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, -1, null, (conn, res) => {
+                try {
+                    const [mode] = conn.call_finish(res).deepUnpack();
+                    this._displayOff = mode.deepUnpack() !== 0;
+                } catch (e) {
+                    return;
+                }
+                if (this._displayOff)
+                    this._hide(true);
+            });
+    }
+
     _armIdleWatch() {
         if (this._idleWatch)
             this._idleMonitor.remove_watch(this._idleWatch);
@@ -69,7 +102,8 @@ export default class GlyphScreensaverExtension extends Extension {
     }
 
     _onIdle() {
-        if (this._overlay || Main.sessionMode.isLocked || Main.sessionMode.currentMode !== 'user')
+        if (this._overlay || Main.sessionMode.isLocked || Main.sessionMode.currentMode !== 'user' ||
+            Main.screenShield?.active || this._displayOff)
             return;
         if (this._settings.get_boolean('skip-fullscreen') && global.display.focus_window?.is_fullscreen())
             return;
@@ -89,6 +123,9 @@ export default class GlyphScreensaverExtension extends Extension {
 
     // ---------- overlay ----------
 
+    // Safety rule: nothing that can throw runs while input is grabbed without a way out. Fallible
+    // setup happens before Main.pushModal, the dismiss handler is connected before the grab exists,
+    // and any later failure (or nothing painted within WATCHDOG_MS) tears everything down.
     _show() {
         if (this._overlay || !this._settings || Main.sessionMode.isLocked)
             return;
@@ -96,53 +133,79 @@ export default class GlyphScreensaverExtension extends Extension {
         if (!monitor)
             return;
 
-        this._overlay = new St.Widget({
+        let grid;
+        try {
+            // On X11 HiDPI the stage is in physical pixels and St scales the UI; elsewhere this is 1.
+            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+            grid = new TerminalGrid(this._settings.get_uint('font-size'), monitor.width, monitor.height, scale);
+        } catch (e) {
+            console.error('glyph-screensaver: cannot start:', e);
+            return;
+        }
+
+        const overlay = new St.Widget({
             reactive: true, can_focus: true, opacity: 0,
             x: 0, y: 0, width: global.stage.width, height: global.stage.height,
             style: 'background-color: #000000;',
         });
-        this._area = new St.DrawingArea({x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height});
-        this._overlay.add_child(this._area);
-        Main.layoutManager.uiGroup.add_child(this._overlay);
-        Main.layoutManager.uiGroup.set_child_above_sibling(this._overlay, null);
+        const area = new St.DrawingArea({x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height});
+        overlay.add_child(area);
+        this._overlay = overlay;
+        this._area = area;
+        this._grid = grid;
+        this._message = null;
+        this._painted = false;
+        this._dirty = true;
+        this._armed = false;
+        this._motionOrigin = null;
+
+        overlay.connect('captured-event', (_a, ev) => this._onEvent(ev));
         // If the shell tears the overlay down itself (e.g. at shutdown), clean up with it.
-        const overlay = this._overlay;
         overlay.connect('destroy', () => {
             if (this._overlay === overlay)
                 this._hide(true);
         });
+        area.connect('repaint', a => this._repaint(a));
+        Main.layoutManager.uiGroup.add_child(overlay);
+        Main.layoutManager.uiGroup.set_child_above_sibling(overlay, null);
 
-        this._grab = Main.pushModal(this._overlay, {actionMode: Shell.ActionMode.NONE});
-        if (!this._grab) {
+        try {
+            this._grab = Main.pushModal(overlay, {actionMode: Shell.ActionMode.NONE});
+            // GNOME 45-49: pushModal returns a grab even when it fails, so check it holds the keyboard.
+            // GNOME 50 removed Clutter.GrabState (grabs can no longer fail that way).
+            const GrabState = Clutter.GrabState;
+            if (!this._grab || (GrabState && this._grab.get_seat_state &&
+                (this._grab.get_seat_state() & GrabState.KEYBOARD) === 0))
+                throw new Error('could not grab input');
+            overlay.grab_key_focus();
+            this._later(ARM_DELAY, () => {
+                this._armed = true;
+                this._motionOrigin = global.get_pointer().slice(0, 2);
+            });
+            this._later(WATCHDOG_MS, () => {
+                if (this._overlay === overlay && !this._painted) {
+                    console.error('glyph-screensaver: nothing painted, closing');
+                    this._hide(true);
+                }
+            });
+
+            this._timeline = new Clutter.Timeline({actor: area, duration: 1000, repeat_count: -1});
+            this._timeline.connect('new-frame', () => {
+                this._pollPointer();
+                if (this._dirty && this._area) {
+                    this._dirty = false;
+                    this._area.queue_repaint();
+                }
+            });
+            this._timeline.start();
+
+            this._startHelper();
+            this._setCursorHidden(true);
+            overlay.ease({opacity: 255, duration: 350, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        } catch (e) {
+            console.error('glyph-screensaver: show failed:', e);
             this._hide(true);
-            return;
         }
-        this._overlay.grab_key_focus();
-
-        // On X11 HiDPI the stage is in physical pixels and St scales the UI; elsewhere this is 1.
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        this._grid = new TerminalGrid(this._settings.get_uint('font-size'), monitor.width, monitor.height, scale);
-        this._message = null;
-        this._area.connect('repaint', a => this._repaint(a));
-        this._startHelper();
-
-        this._armed = false;
-        this._motionOrigin = null;
-        this._later(ARM_DELAY, () => (this._armed = true));
-        this._overlay.connect('captured-event', (_a, ev) => this._onEvent(ev));
-
-        this._dirty = true;
-        this._timeline = new Clutter.Timeline({actor: this._area, duration: 1000, repeat_count: -1});
-        this._timeline.connect('new-frame', () => {
-            if (this._dirty && this._area) {
-                this._dirty = false;
-                this._area.queue_repaint();
-            }
-        });
-        this._timeline.start();
-
-        this._setCursorHidden(true);
-        this._overlay.ease({opacity: 255, duration: 350, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
     _hide(immediate = false) {
@@ -150,64 +213,101 @@ export default class GlyphScreensaverExtension extends Extension {
             return;
         const overlay = this._overlay;
         this._overlay = null;
-        this._stopHelper();
+        // Release input first, so nothing below can leave it captured.
         if (this._grab) {
-            Main.popModal(this._grab);
+            try {
+                Main.popModal(this._grab);
+            } catch (e) {
+                console.error('glyph-screensaver: popModal failed:', e);
+            }
             this._grab = null;
         }
+        try {
+            this._stopHelper();
+        } catch (e) {
+            console.error('glyph-screensaver:', e);
+        }
         this._setCursorHidden(false);
-        const finish = () => {
-            this._timeline?.stop();
-            this._timeline = null;
-            this._area = null;
-            this._grid = null;
-            overlay.destroy();
-        };
+        this._timeline?.stop();
+        this._timeline = null;
+        this._area = null;
+        this._grid = null;
         if (immediate)
-            finish();
+            overlay.destroy();
         else
-            overlay.ease({opacity: 0, duration: 250, mode: Clutter.AnimationMode.EASE_OUT_QUAD, onStopped: finish});
+            overlay.ease({opacity: 0, duration: 250, mode: Clutter.AnimationMode.EASE_OUT_QUAD, onStopped: () => overlay.destroy()});
     }
 
     _onEvent(ev) {
-        if (!this._armed)
-            return Clutter.EVENT_STOP;
-        switch (ev.type()) {
-        case Clutter.EventType.KEY_PRESS:
-        case Clutter.EventType.BUTTON_PRESS:
-        case Clutter.EventType.TOUCH_BEGIN:
-        case Clutter.EventType.SCROLL:
-            this._hide();
-            break;
-        case Clutter.EventType.MOTION: {
-            const [x, y] = ev.get_coords();
-            if (!this._motionOrigin)
-                this._motionOrigin = [x, y];
-            else if (Math.hypot(x - this._motionOrigin[0], y - this._motionOrigin[1]) > MOVE_THRESHOLD)
+        // Clutter requires crossing events to propagate (it warns otherwise); they can't reach other apps anyway.
+        const type = ev.type();
+        if (type === Clutter.EventType.ENTER || type === Clutter.EventType.LEAVE)
+            return Clutter.EVENT_PROPAGATE;
+        try {
+            if (!this._armed)
+                return Clutter.EVENT_STOP;
+            switch (type) {
+            case Clutter.EventType.KEY_PRESS:
+            case Clutter.EventType.BUTTON_PRESS:
+            case Clutter.EventType.TOUCH_BEGIN:
+            case Clutter.EventType.SCROLL:
                 this._hide();
-            break;
-        }
+                break;
+            case Clutter.EventType.MOTION: {
+                const [x, y] = ev.get_coords();
+                if (!this._motionOrigin)
+                    this._motionOrigin = [x, y];
+                else if (Math.hypot(x - this._motionOrigin[0], y - this._motionOrigin[1]) > MOVE_THRESHOLD)
+                    this._hide();
+                break;
+            }
+            }
+        } catch (e) {
+            console.error('glyph-screensaver: input handler failed:', e);
+            this._hide(true);
         }
         return Clutter.EVENT_STOP;
     }
 
+    // On GNOME 49+ hiding the cursor also stops pointer events from reaching the overlay, so mouse
+    // movement and clicks are detected by polling the pointer every frame as well.
+    _pollPointer() {
+        if (!this._armed || !this._overlay || !this._motionOrigin)
+            return;
+        const [x, y, mods] = global.get_pointer();
+        const buttons = Clutter.ModifierType.BUTTON1_MASK | Clutter.ModifierType.BUTTON2_MASK |
+            Clutter.ModifierType.BUTTON3_MASK;
+        if ((mods & buttons) !== 0 ||
+            Math.hypot(x - this._motionOrigin[0], y - this._motionOrigin[1]) > MOVE_THRESHOLD)
+            this._hide();
+    }
+
     _setCursorHidden(hidden) {
+        if (hidden === !!this._cursorHidden)
+            return;
         try {
             // GNOME 46+: backend cursor tracker; GNOME 45: per-display tracker
             const tracker = global.backend?.get_cursor_tracker?.() ?? Meta.CursorTracker.get_for_display(global.display);
-            if (hidden === !!this._cursorHidden)
-                return;
-            if (tracker.inhibit_cursor_visibility) {
-                if (hidden)
+            const backend = global.stage.context?.get_backend?.() ?? Clutter.get_default_backend();
+            const seat = backend.get_default_seat();
+            if (hidden) {
+                // Like GNOME Shell itself: keep pointer focus while the cursor is hidden, otherwise
+                // GNOME 49+ stops delivering pointer events (mouse moves and clicks wouldn't dismiss).
+                seat.inhibit_unfocus?.();
+                if (tracker.inhibit_cursor_visibility)
                     tracker.inhibit_cursor_visibility();
                 else
-                    tracker.uninhibit_cursor_visibility();
+                    tracker.set_pointer_visible(false);
             } else {
-                tracker.set_pointer_visible(!hidden);
+                if (tracker.uninhibit_cursor_visibility)
+                    tracker.uninhibit_cursor_visibility();
+                else
+                    tracker.set_pointer_visible(true);
+                seat.uninhibit_unfocus?.();
             }
             this._cursorHidden = hidden;
         } catch (e) {
-            this._cursorHidden = false;
+            console.error('glyph-screensaver: cursor visibility:', e);
         }
     }
 
@@ -282,8 +382,11 @@ export default class GlyphScreensaverExtension extends Extension {
             } else if (this._grid) {
                 this._grid.paint(cr);
             }
+            this._painted = true;
         } catch (e) {
-            console.error('glyph-screensaver:', e);
+            // Never keep a screensaver up that can't draw: close it outside the paint cycle.
+            console.error('glyph-screensaver: paint failed:', e);
+            this._later(0, () => this._hide(true));
         } finally {
             cr.$dispose();
         }

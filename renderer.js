@@ -106,22 +106,30 @@ export class TerminalGrid {
      */
     constructor(fontSizePt, width, height, scale = 1) {
         const px = fontSizePt * 96 / 72 * scale;
+        // Font metrics come from Pango: GJS's cairo binding has no fontExtents() before GNOME 47.
         const surf = new Cairo.ImageSurface(Cairo.Format.ARGB32, 1, 1);
         const cr = new Cairo.Context(surf);
+        const fd = Pango.FontDescription.from_string(MONO);
+        fd.set_absolute_size(px * Pango.SCALE);
+        const layout = PangoCairo.create_layout(cr);
+        layout.set_font_description(fd);
+        const metrics = layout.get_context().get_metrics(fd, null);
+        const ascent = metrics.get_ascent() / Pango.SCALE;
+        const descent = metrics.get_descent() / Pango.SCALE;
         cr.selectFontFace(MONO, Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);
         cr.setFontSize(px);
-        const fe = cr.fontExtents();
         const cw = cr.textExtents('M').xAdvance;
         cr.$dispose();
-        const ch = Math.ceil(fe.ascent + fe.descent);
+        if (!(cw > 0 && ascent > 0))
+            throw new Error(`glyph-screensaver: bad font metrics for "${MONO}"`);
         this.px = px;
         this.cw = cw;
-        this.ch = ch;
-        this.ascent = fe.ascent;
+        this.ch = Math.ceil(ascent + descent);
+        this.ascent = ascent;
         this.cols = Math.max(20, Math.floor(width / cw));
-        this.rows = Math.max(8, Math.floor(height / ch));
+        this.rows = Math.max(8, Math.floor(height / this.ch));
         this.ox = Math.floor((width - this.cols * cw) / 2);
-        this.oy = Math.floor((height - this.rows * ch) / 2);
+        this.oy = Math.floor((height - this.rows * this.ch) / 2);
         this.cells = new Map();
         this._colors = new Map();
         this._layouts = new Map();
