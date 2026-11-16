@@ -46,7 +46,7 @@ Open **Extensions → Glyph Screensaver → Settings** to change the text (leave
 
 ## Compatibility
 
-Declared for GNOME 45–51. Developed and tested on GNOME 51 (Fedora 45). Reports from other versions are welcome.
+Works on GNOME 45–51. Every version is tested end to end in a real GNOME Shell (see [tests](tests/README.md)): run `tests/run.sh` with podman installed. Reports from real-world setups are welcome.
 
 ## Credits
 

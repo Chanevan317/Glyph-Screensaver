@@ -1,0 +1,8 @@
+ARG VER
+FROM registry.fedoraproject.org/fedora:${VER}
+ARG PKGS="gnome-shell gnome-extensions-app mesa-dri-drivers mesa-libEGL dbus-daemon dconf python3 glib2 procps-ng zip unzip"
+# Releases past end-of-life live on the archive server.
+RUN dnf -y install $PKGS >/dev/null 2>&1 || { \
+      sed -i -e 's|^metalink=|#metalink=|' \
+             -e 's|^#baseurl=http://download.example/pub/fedora/linux|baseurl=https://archives.fedoraproject.org/pub/archive/fedora/linux|' \
+             /etc/yum.repos.d/fedora*.repo && dnf -y install $PKGS; } && dnf clean all
