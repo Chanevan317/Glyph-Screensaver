@@ -85,6 +85,18 @@ export default class GlyphTest extends Extension {
         this._kb.notify_keyval(t + 1000, Clutter.KEY_a, Clutter.KeyState.RELEASED);
     }
 
+    // Press keys in order, then release in reverse, like a person pressing a shortcut.
+    async _combo(...keyvals) {
+        for (const k of keyvals) {
+            this._kb.notify_keyval(GLib.get_monotonic_time(), k, Clutter.KeyState.PRESSED);
+            await sleep(30);
+        }
+        for (const k of keyvals.reverse()) {
+            this._kb.notify_keyval(GLib.get_monotonic_time(), k, Clutter.KeyState.RELEASED);
+            await sleep(30);
+        }
+    }
+
     async _moveMouse() {
         // Spread over several frames: Clutter merges motion events within one frame.
         for (let i = 0; i < 6; i++) {
@@ -165,6 +177,45 @@ export default class GlyphTest extends Extension {
         check('preview setting opens screensaver', await waitFor(() => !!this.s._overlay, 3000));
         await this._dismissedBy('dismiss after preview', () => this._key());
 
+        // Start shortcut: Super+Alt+G by default, changeable, inactive while the extension is disabled.
+        const SUPER = Clutter.KEY_Super_L, ALT = Clutter.KEY_Alt_L;
+        check('shortcut: default is Super+Alt+G', JSON.stringify(st.get_strv('start-shortcut')) === '["<Super><Alt>g"]',
+            `value=${JSON.stringify(st.get_strv('start-shortcut'))}`);
+        await this._combo(SUPER, ALT, Clutter.KEY_g);
+        check('shortcut: Super+Alt+G starts it', await waitFor(() => !!this.s._overlay && grabbed(), 2000), this._state());
+        check('shortcut: it animates', await this._animating(), this._state());
+        await this._dismissedBy('shortcut: dismiss after shortcut start', () => this._key());
+
+        st.set_strv('start-shortcut', ['<Super><Alt>x']);
+        await sleep(300);
+        await this._combo(SUPER, ALT, Clutter.KEY_g);
+        await sleep(1200);
+        const oldStillWorks = !!this.s._overlay;
+        this.s._hide(true);
+        await this._combo(SUPER, ALT, Clutter.KEY_x);
+        const newWorks = await waitFor(() => !!this.s._overlay, 2000);
+        check('shortcut: changing it takes effect', !oldStillWorks && newWorks, `old-still-works=${oldStillWorks} new-works=${newWorks}`);
+        await this._dismissedBy('shortcut: dismiss after new shortcut', () => this._key());
+
+        st.set_strv('start-shortcut', []);
+        await sleep(300);
+        await this._combo(SUPER, ALT, Clutter.KEY_x);
+        await sleep(1200);
+        check('shortcut: can be disabled', !this.s._overlay, this._state());
+        this.s._hide(true);
+        st.reset('start-shortcut');
+        await sleep(300);
+
+        this.s.disable();
+        await this._combo(SUPER, ALT, Clutter.KEY_g);
+        await sleep(1200);
+        check('shortcut: inactive while extension is disabled', !this.s._overlay && !grabbed(), this._state());
+        this.s.enable();
+        await sleep(300);
+        await this._combo(SUPER, ALT, Clutter.KEY_g);
+        check('shortcut: works again after re-enable', await waitFor(() => !!this.s._overlay, 2000), this._state());
+        await this._dismissedBy('shortcut: dismiss after re-enable', () => this._key());
+
         // Safety: a failure must never leave input grabbed (the GNOME 46 freeze).
         const realSettings = this.s._settings;
         this.s._settings = {
@@ -229,6 +280,9 @@ export default class GlyphTest extends Extension {
         const lockState = Main.extensionManager.lookup(UUID).state;
         check('lock: screensaver closes, extension paused', !grabbed() && !this.s._overlay && lockState !== 1,
             `state=${lockState} ${this._state()}`);
+        await this._combo(Clutter.KEY_Super_L, Clutter.KEY_Alt_L, Clutter.KEY_g);
+        await sleep(1200);
+        check('lock: shortcut does nothing on the lock screen', !this.s._overlay, this._state());
         Main.sessionMode.popMode('unlock-dialog');
         check('unlock: extension active again', await waitFor(() => Main.extensionManager.lookup(UUID)?.state === 1, 5000));
         this.s._show();

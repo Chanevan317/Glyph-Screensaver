@@ -20,7 +20,8 @@ monitor, and loads a small test driver extension (`driver/`) that drives the rea
 
 - it loads, opens, grabs input and paints real animation frames
 - a key press, mouse movement and a mouse click each dismiss it
-- the Preview button and the idle timer start it
+- the Preview button, the idle timer and the Super+Alt+G shortcut start it (the shortcut can be
+  changed or disabled, and does nothing while disabled or on the lock screen)
 - forced failures (during setup, after grabbing input, while painting, and painting nothing at all)
   never leave input grabbed
 - a missing animation engine shows a message instead of a black screen

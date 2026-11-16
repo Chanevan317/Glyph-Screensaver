@@ -27,6 +27,10 @@
       <default>[]</default>
       <summary>Effects excluded from the random rotation</summary>
     </key>
+    <key name="start-shortcut" type="as">
+      <default><![CDATA[['<Super><Alt>g']]]></default>
+      <summary>Keyboard shortcut that starts the screensaver right away (empty = none)</summary>
+    </key>
     <key name="preview" type="u">
       <default>0</default>
       <summary>Incremented by the preferences window to request a preview</summary>

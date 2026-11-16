@@ -156,6 +156,7 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         });
         settings.bind('idle-delay', delayRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         behave.add(delayRow);
+        behave.add(this._shortcutRow(window, settings));
         const fsRow = new Adw.SwitchRow({
             title: 'Pause for fullscreen apps',
             subtitle: 'Don’t start while a fullscreen window (game, video) is focused',
@@ -202,6 +203,69 @@ export default class GlyphScreensaverPrefs extends ExtensionPreferences {
         settings.connect('changed::text', refreshArt);
         settings.connect('changed::font-style', refreshArt);
         refreshArt();
+    }
+
+    /** "Start shortcut" row: shows the current shortcut; click to record a new one, or reset it. */
+    _shortcutRow(window, settings) {
+        const row = new Adw.ActionRow({
+            title: 'Start shortcut',
+            subtitle: 'Start the screensaver right away',
+            activatable: true,
+        });
+        const label = new Gtk.ShortcutLabel({disabled_text: 'Disabled', valign: Gtk.Align.CENTER});
+        const reset = new Gtk.Button({
+            icon_name: 'edit-undo-symbolic', valign: Gtk.Align.CENTER,
+            tooltip_text: 'Reset to Super+Alt+G', css_classes: ['flat'],
+        });
+        const update = () => {
+            label.accelerator = settings.get_strv('start-shortcut')[0] ?? '';
+            const def = settings.get_default_value('start-shortcut').deepUnpack();
+            reset.sensitive = JSON.stringify(settings.get_strv('start-shortcut')) !== JSON.stringify(def);
+        };
+        reset.connect('clicked', () => settings.reset('start-shortcut'));
+        row.add_suffix(label);
+        row.add_suffix(reset);
+        row.connect('activated', () => this._recordShortcut(window, settings));
+        settings.connect('changed::start-shortcut', update);
+        update();
+        return row;
+    }
+
+    /** Modal that records one key combination, like GNOME Settings' shortcut editor. */
+    _recordShortcut(parent, settings) {
+        const win = new Adw.Window({modal: true, transient_for: parent, default_width: 420, default_height: 260, resizable: false});
+        const status = new Adw.StatusPage({
+            icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
+            title: 'Press a key combination',
+            description: 'Use at least one of Ctrl, Alt or Super.\nEsc to cancel · Backspace to disable',
+        });
+        const view = new Adw.ToolbarView({content: status});
+        view.add_top_bar(new Adw.HeaderBar({show_title: false}));
+        win.set_content(view);
+
+        const keys = new Gtk.EventControllerKey();
+        keys.connect('key-pressed', (_c, keyval, _code, state) => {
+            const mods = state & Gtk.accelerator_get_default_mod_mask();
+            const key = Gdk.keyval_to_lower(keyval);
+            if (!mods && key === Gdk.KEY_Escape) {
+                win.close();
+            } else if (!mods && key === Gdk.KEY_BackSpace) {
+                settings.set_strv('start-shortcut', []);
+                win.close();
+            } else if (mods && Gtk.accelerator_valid(key, mods)) {
+                settings.set_strv('start-shortcut', [Gtk.accelerator_name(key, mods)]);
+                win.close();
+            }
+            return Gdk.EVENT_STOP;  // lone modifiers and plain keys: keep waiting
+        });
+        win.add_controller(keys);
+        // Let Super combinations reach this window instead of GNOME Shell while recording.
+        win.connect('map', () => {
+            try {
+                win.get_surface()?.inhibit_system_shortcuts?.(null);
+            } catch (e) {}
+        });
+        win.present();
     }
 
     /** A window that loops one effect, rendered exactly like the fullscreen screensaver, scaled to fit. */

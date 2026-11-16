@@ -11,7 +11,7 @@ An animated ASCII-art screensaver for GNOME. Your text in big figlet letters on 
 - **Native GNOME Shell overlay.** Drawn by the shell itself (no terminal window), pure black, cursor hidden, on top of everything.
 - **37 animations** from terminaltexteffects. A random one plays each cycle, with Omarchy's exact settings. Turn effects on or off and preview each one from the settings.
 - **14 font styles**, with Omarchy's Delta Corps Priest as the default. A live preview shows your text as you type.
-- **Behaves well.** Starts after your chosen idle time and stays away during video, calls and fullscreen apps. Any key or mouse movement dismisses it.
+- **Behaves well.** Starts after your chosen idle time, or right away with **Super+Alt+G**. Stays away during video, calls and fullscreen apps. Any key, click or mouse movement dismisses it.
 
 ![Font styles](assets/styles.png)
 
@@ -38,7 +38,7 @@ It puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private v
 
 ## Settings
 
-Open **Extensions → Glyph Screensaver → Settings** to change the text (leave it empty to use your user name), the font style and size, and the idle delay, to pick effects, or to press **Preview**.
+Open **Extensions → Glyph Screensaver → Settings** to change the text (leave it empty to use your user name), the font style and size, the idle delay and the start shortcut, to pick effects, or to press **Preview**.
 
 ## How it works
 

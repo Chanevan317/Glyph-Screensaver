@@ -47,6 +47,10 @@ export default class GlyphScreensaverExtension extends Extension {
         this._displayOff = false;
         this._monitorManager = global.backend?.get_monitor_manager?.() ?? null;
         this._powerId = this._monitorManager?.connect('power-save-mode-changed', () => this._checkPowerSave()) ?? 0;
+        // Start-now shortcut (Super+Alt+G by default). Only on the desktop and in the overview, never on
+        // the lock screen; mutter re-reads the setting when it changes.
+        Main.wm.addKeybinding('start-shortcut', this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._show());
         this._armIdleWatch();
     }
 
@@ -58,6 +62,7 @@ export default class GlyphScreensaverExtension extends Extension {
         this._settingsIds.forEach(id => this._settings.disconnect(id));
         Main.sessionMode.disconnect(this._sessionId);
         Main.layoutManager.disconnect(this._monitorsId);
+        Main.wm.removeKeybinding('start-shortcut');
         if (this._shieldId)
             Main.screenShield?.disconnect(this._shieldId);
         if (this._powerId)
