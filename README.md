@@ -23,11 +23,11 @@ One command:
 curl -fsSL https://raw.githubusercontent.com/Chanevan317/Glyph-Screensaver/main/install.sh | bash
 ```
 
-If it asks you to, log out and back in. That's it: Glyph Screensaver then shows up in Extension Manager like any other extension.
+Then log out and back in. Run the same command again any time to update.
 
 You need GNOME Shell 45 or newer and Python 3.8+. On Debian/Ubuntu, run `sudo apt install python3-venv` first.
 
-Installed it from Extension Manager or extensions.gnome.org? Run the same command once to set up the animation engine; the extension's settings remind you if it's missing.
+> **Not on extensions.gnome.org.** Glyph Screensaver isn't listed on the GNOME Extensions website, so you won't find it by searching in Extension Manager. Install it with the command above. Once installed, it appears in Extension Manager and the Extensions app like any other extension, where you can turn it on or off, open its settings, or remove it.
 
 <details>
 <summary>What the command does</summary>
@@ -39,6 +39,23 @@ It puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private v
 ## Settings
 
 Open **Extensions → Glyph Screensaver → Settings** to change the text (leave it empty to use your user name), the font style and size, the idle delay and the start shortcut, to pick effects, or to press **Preview**.
+
+## Starting it
+
+- **Automatically** after the idle time you choose (2.5 minutes by default).
+- **Right away** with **Super+Alt+G**, from the desktop or the overview. Change or disable the shortcut under **Settings → Behavior → Start shortcut**.
+- **From the settings** with the **Preview** button.
+
+Any key, click or mouse movement dismisses it. It doesn't start while a video, call or fullscreen app is active, and the shortcut does nothing on the lock screen.
+
+## Power and screen blanking
+
+The screensaver only draws on top of your desktop. It doesn't change any power settings, and everything underneath keeps running.
+
+- **Screen Blank** (Settings → Power) still applies. With GNOME's default of 5 minutes, you'll see the screensaver from 2.5 minutes until the screen blanks; it then closes and stops its animation engine. Set Screen Blank to **Never** to keep it running.
+- **Automatic Suspend** works as usual, plugged in or on battery. The screensaver never blocks it.
+- **Screen lock** takes over when it triggers, and the screensaver closes.
+- **It works the same on the charger and on battery.** While it runs, the animation engine uses roughly a quarter of one CPU core (up to about two thirds for the Matrix effect), so on battery it drains faster than a blank screen.
 
 ## How it works
 
