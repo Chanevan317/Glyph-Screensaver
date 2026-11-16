@@ -32,7 +32,7 @@ Installed it from Extension Manager or extensions.gnome.org? Run the same comman
 <details>
 <summary>What the command does</summary>
 
-It puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private virtualenv at `~/.local/share/glyph-screensaver/venv`, installs the latest release of the extension (unless it's already installed), and enables it. Nothing is installed system-wide and no `sudo` is used. Running `./install.sh` from a clone installs that checkout instead.
+It puts the animation engine (`terminaltexteffects` + `pyfiglet`) in a private virtualenv at `~/.local/share/glyph-screensaver/venv`, installs the latest release of the extension (upgrading an existing install), and enables it. Run it again any time to update. Nothing is installed system-wide and no `sudo` is used. Running `./install.sh` from a clone installs that checkout instead.
 
 </details>
 
