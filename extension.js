@@ -19,6 +19,8 @@ import {findPython, displayText} from './common.js';
 const ARM_DELAY = 700;      // ms before input dismisses (so the Preview click doesn't close it)
 const MOVE_THRESHOLD = 12;  // px of mouse travel that counts as activity
 const WATCHDOG_MS = 3000;   // close if nothing has been painted by then
+const STALL_US = 10 * 1000 * 1000;  // engine silent this long = stuck (effects pause at most ~1 s)
+const MAX_RESTARTS = 3;
 const MISSING_ENGINE = 'Glyph Screensaver needs terminaltexteffects — open the extension settings for setup.';
 
 export default class GlyphScreensaverExtension extends Extension {
@@ -163,6 +165,7 @@ export default class GlyphScreensaverExtension extends Extension {
         this._dirty = true;
         this._armed = false;
         this._motionOrigin = null;
+        this._restarts = 0;
 
         overlay.connect('captured-event', (_a, ev) => this._onEvent(ev));
         // If the shell tears the overlay down itself (e.g. at shutdown), clean up with it.
@@ -337,10 +340,39 @@ export default class GlyphScreensaverExtension extends Extension {
         }
         this._cancel = new Gio.Cancellable();
         this._stdout = new Gio.DataInputStream({base_stream: this._proc.get_stdout_pipe(), close_base_stream: true});
+        this._lastLine = GLib.get_monotonic_time();
+        this._stallId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 2, () => {
+            if (this._proc && !this._message && GLib.get_monotonic_time() - this._lastLine > STALL_US) {
+                this._stallId = 0;
+                this._engineFailed('stopped sending frames');
+                return GLib.SOURCE_REMOVE;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
         this._readLine();
     }
 
+    // The engine died or hung mid-run: restart it rather than leave a frozen frame up, and close
+    // the screensaver if it keeps failing.
+    _engineFailed(why) {
+        if (!this._overlay)
+            return;
+        console.error(`glyph-screensaver: animation engine ${why}`);
+        this._stopHelper();
+        if (++this._restarts > MAX_RESTARTS) {
+            this._hide();
+            return;
+        }
+        this._grid.cells.clear();
+        this._dirty = true;
+        this._startHelper();
+    }
+
     _stopHelper() {
+        if (this._stallId) {
+            GLib.source_remove(this._stallId);
+            this._stallId = 0;
+        }
         this._cancel?.cancel();
         this._proc?.force_exit();
         this._proc = null;
@@ -355,6 +387,8 @@ export default class GlyphScreensaverExtension extends Extension {
             try {
                 [line] = s.read_line_finish_utf8(res);
             } catch (e) {
+                if (!cancel.is_cancelled())
+                    this._engineFailed(`read failed: ${e.message}`);
                 return;
             }
             if (cancel.is_cancelled() || !this._grid)
@@ -364,11 +398,18 @@ export default class GlyphScreensaverExtension extends Extension {
                 if (!this._grid.effect) {
                     this._message = MISSING_ENGINE;
                     this._dirty = true;
+                } else {
+                    this._engineFailed('exited');
                 }
                 return;
             }
-            if (this._grid.handleLine(line))
-                this._dirty = true;
+            this._lastLine = GLib.get_monotonic_time();
+            try {
+                if (this._grid.handleLine(line))
+                    this._dirty = true;
+            } catch (e) {
+                console.error('glyph-screensaver: bad frame skipped:', e);
+            }
             this._readLine();
         });
     }

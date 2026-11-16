@@ -261,6 +261,62 @@ export default class GlyphTest extends Extension {
             moveFile(`${VENV}.off`, VENV);
         }
 
+        // Engine dies mid-run (e.g. an effect crashing inside terminaltexteffects): it restarts, no frozen frame.
+        this.s._show();
+        await this._animating();
+        const deadPid = this.s._proc?.get_identifier?.();
+        GLib.spawn_command_line_sync(`kill -9 ${deadPid}`);
+        const restarted = await waitFor(() => this.s._proc && this.s._proc.get_identifier() !== deadPid, 3000);
+        check('engine dies: restarts and keeps animating', restarted && await this._animating() && !!this.s._overlay,
+            this._state());
+        // Engine hangs (stops sending frames): detected and restarted.
+        const hungPid = this.s._proc?.get_identifier?.();
+        GLib.spawn_command_line_sync(`kill -STOP ${hungPid}`);
+        const unstuck = await waitFor(() => this.s._proc && this.s._proc.get_identifier() !== hungPid, 14000);
+        GLib.spawn_command_line_sync(`kill -9 ${hungPid}`);
+        check('engine hangs: detected and restarted', unstuck && await this._animating() && !!this.s._overlay,
+            this._state());
+        // Keeps failing: closes instead of sitting on a dead screen.
+        for (let i = 0; i < 6 && this.s._overlay; i++) {
+            GLib.spawn_command_line_sync(`kill -9 ${this.s._proc?.get_identifier?.()}`);
+            await sleep(600);
+        }
+        check('engine keeps dying: screensaver closes, input free', await waitFor(() => !this.s._overlay && !grabbed(), 3000),
+            this._state());
+        await sleep(500);
+
+        // The real-world freeze: terminaltexteffects' blackhole crashes with small text (here every other
+        // effect is off, so it plays back to back). The engine must survive it on its own.
+        const realSt = this.s._settings;
+        const [, listOut] = GLib.spawn_sync(null, [`${VENV}/bin/python`, '-I', '-c',
+            "import sys; sys.argv=['tte']\nfrom terminaltexteffects.__main__ import build_parsers_and_parse_args as b\n" +
+            "print(','.join(b()[1]))"], null, GLib.SpawnFlags.SEARCH_PATH, null);
+        const others = new TextDecoder().decode(listOut).trim().split(',').filter(e => e && e !== 'blackhole');
+        // Settings as on the machine where it froze. (Wrapped rather than written: dconf in the
+        // container drops these writes again within a second.)
+        const over = {text: 'chan', 'font-style': 'bloody', 'font-size': 30, 'disabled-effects': others};
+        this.s._settings = new Proxy(realSt, {
+            get: (t, k) => {
+                if (['get_string', 'get_uint', 'get_strv'].includes(k))
+                    return key => over[key] ?? t[k](key);
+                const v = t[k];
+                return typeof v === 'function' ? v.bind(t) : v;
+            },
+        });
+        this.s._show();
+        await waitFor(() => this.s._proc, 3000);
+        const bhPid = this.s._proc?.get_identifier?.();
+        const seen = new Set();
+        for (let i = 0; i < 100 && this.s._overlay; i++) {  // ~25 s: several blackhole runs (it crashes ~9 in 10)
+            await sleep(250);
+            seen.add(`${this.s._grid?.effect}`);
+        }
+        check('blackhole crash with small text: engine survives, still animating',
+            !!this.s._overlay && this.s._restarts === 0 && this.s._proc?.get_identifier?.() === bhPid &&
+            this.s._grid?.cells.size > 0, `restarts=${this.s._restarts} effects=${[...seen].join('/')} ${this._state()}`);
+        await this._dismissedBy('blackhole crash: dismissable', () => this._key());
+        this.s._settings = realSt;
+
         // disable() while running, then enable(): what GNOME does around lock/unlock.
         this.s._show();
         await sleep(1000);

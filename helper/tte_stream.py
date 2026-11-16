@@ -16,6 +16,7 @@ import random
 import signal
 import sys
 import time
+import traceback
 
 STYLES = {
     'omarchy': 'delta_corps_priest_1',
@@ -71,33 +72,56 @@ def stream(art, cols, rows, exclude, only=None):
     if only in effect_map:
         available = [only]  # single-effect preview: loop just this one
     out = sys.stdout
+    failures = 0
     while True:
         name = random.choice(available)
-        effect_cls, config_cls = effect_map[name]
-        effect = effect_cls(art, config_cls._build_config(None), TerminalConfig._build_config(args))
         out.write(f'N {name}\nC\n')
-        prev = {}
-        it = iter(effect)
-        for _ in it:  # each step advances one frame and enforces 120 fps
-            term = it.terminal
-            top, roff, coff = term.visible_top, term.canvas_row_offset, term.canvas_column_offset
-            cur = {}
-            for ch in sorted(term._visible_characters, key=lambda c: c.layer):
-                row = ch.motion.current_coord.row + roff
-                col = ch.motion.current_coord.column + coff
-                if term.visible_bottom <= row <= top and term.visible_left <= col <= term.visible_right:
-                    v = ch.animation.current_character_visual
-                    cur[(col - 1, top - row)] = (ord(v.symbol[0]) if v.symbol else 32,
-                                                 color(v._fg_color_code), color(v._bg_color_code),
-                                                 '1' if v.dim else '')
-            parts = [f'{k[0]},{k[1]},{val[0]},{val[1]},{val[2]},{val[3]}'
-                     for k, val in cur.items() if prev.get(k) != val]
-            parts += [f'{k[0]},{k[1]},32,,,' for k in prev.keys() - cur.keys()]
-            out.write('F ' + ';'.join(parts) + '\n')
+        frames = [0]
+        try:
+            play(effect_map[name], art, args, TerminalConfig, out, frames)
+            failures = 0
+        except BrokenPipeError:
+            raise
+        except Exception:
+            # An effect can crash inside terminaltexteffects (e.g. blackhole with small text).
+            # Skip it for the rest of this run instead of dying and freezing the screen.
+            traceback.print_exc()
+            failures = failures + 1 if frames[0] == 0 else 0  # only instant failures can spin
+            if failures >= 10:
+                raise
+            if len(available) > 1:
+                available.remove(name)
+            out.write('C\n')
             out.flush()
-            prev = cur
+            continue
         # Omarchy polls once a second before starting the next effect: hold the final frame briefly.
         time.sleep(random.uniform(0.4, 1.0))
+
+
+def play(effect_map_entry, art, args, TerminalConfig, out, frames):
+    effect_cls, config_cls = effect_map_entry
+    effect = effect_cls(art, config_cls._build_config(None), TerminalConfig._build_config(args))
+    prev = {}
+    it = iter(effect)
+    for _ in it:  # each step advances one frame and enforces 120 fps
+        term = it.terminal
+        top, roff, coff = term.visible_top, term.canvas_row_offset, term.canvas_column_offset
+        cur = {}
+        for ch in sorted(term._visible_characters, key=lambda c: c.layer):
+            row = ch.motion.current_coord.row + roff
+            col = ch.motion.current_coord.column + coff
+            if term.visible_bottom <= row <= top and term.visible_left <= col <= term.visible_right:
+                v = ch.animation.current_character_visual
+                cur[(col - 1, top - row)] = (ord(v.symbol[0]) if v.symbol else 32,
+                                             color(v._fg_color_code), color(v._bg_color_code),
+                                             '1' if v.dim else '')
+        parts = [f'{k[0]},{k[1]},{val[0]},{val[1]},{val[2]},{val[3]}'
+                 for k, val in cur.items() if prev.get(k) != val]
+        parts += [f'{k[0]},{k[1]},32,,,' for k in prev.keys() - cur.keys()]
+        out.write('F ' + ';'.join(parts) + '\n')
+        out.flush()
+        frames[0] += 1
+        prev = cur
 
 
 def main():

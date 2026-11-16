@@ -25,6 +25,9 @@ monitor, and loads a small test driver extension (`driver/`) that drives the rea
 - forced failures (during setup, after grabbing input, while painting, and painting nothing at all)
   never leave input grabbed
 - a missing animation engine shows a message instead of a black screen
+- if the animation engine dies, hangs or keeps crashing, it's restarted (or the screensaver closes)
+  instead of freezing on the last frame; an effect that crashes inside terminaltexteffects (Black Hole
+  with small text) is skipped without stopping the engine
 - it survives disable/enable and lock/unlock
 - it closes and stops its engine when the displays switch off (screen blank)
 - the preferences window opens
