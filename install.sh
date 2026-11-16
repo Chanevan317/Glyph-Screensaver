@@ -34,42 +34,55 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --disable-pip-version-check "terminaltexteffects>=0.15,<0.16" pyfiglet
 
 # ---- extension ----
-# Check the disk, not `gnome-extensions info`: the running shell only knows extensions loaded at login.
-installed() {
+# Version of an installed copy, read from disk: the running shell only knows what it loaded at login.
+installed_version() {
     local d dirs
     IFS=: read -ra dirs <<< "${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
     for d in "${dirs[@]}"; do
-        [[ -f "$d/gnome-shell/extensions/$UUID/metadata.json" ]] && return 0
+        if [[ -f "$d/gnome-shell/extensions/$UUID/metadata.json" ]]; then
+            python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("version-name", "?"))' \
+                "$d/gnome-shell/extensions/$UUID/metadata.json"
+            return
+        fi
     done
-    return 1
+}
+zip_version() {
+    python3 -c 'import json, sys, zipfile; print(json.loads(zipfile.ZipFile(sys.argv[1]).read("metadata.json")).get("version-name", "?"))' "$1"
 }
 
+OLD="$(installed_version)"
 if [[ -n "$SRC" ]]; then
-    say "Installing the extension from $SRC"
+    say "Building the extension from $SRC"
     "$SRC/pack.sh" >/dev/null
-    gnome-extensions install --force "$SRC/dist/$UUID.shell-extension.zip"
-elif installed; then
-    say "Extension already installed; leaving it as is (updates come through Extension Manager)"
+    ZIP="$SRC/dist/$UUID.shell-extension.zip"
 else
     say "Downloading the latest release"
     TMP="$(mktemp -d)"
     trap 'rm -rf "$TMP"' EXIT
+    ZIP="$TMP/ext.zip"
     if command -v curl >/dev/null; then
-        curl -fsSL -o "$TMP/ext.zip" "$ZIP_URL"
+        curl -fsSL -o "$ZIP" "$ZIP_URL"
     elif command -v wget >/dev/null; then
-        wget -qO "$TMP/ext.zip" "$ZIP_URL"
+        wget -qO "$ZIP" "$ZIP_URL"
     else
-        die "curl or wget is needed to download the extension."
+        python3 -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' "$ZIP_URL" "$ZIP" ||
+            die "Could not download $ZIP_URL"
     fi
-    gnome-extensions install --force "$TMP/ext.zip"
 fi
+NEW="$(zip_version "$ZIP")"
+if [[ "$OLD" == "$NEW" ]]; then
+    say "Reinstalling the extension ($NEW)"
+elif [[ -n "$OLD" ]]; then
+    say "Updating the extension: $OLD -> $NEW"
+else
+    say "Installing the extension ($NEW)"
+fi
+gnome-extensions install --force "$ZIP"
 
 # ---- enable ----
-# A freshly installed extension is only loaded by GNOME Shell after the next login, so if enabling
-# now fails, add it to the enabled list directly and it starts with the next session.
-if gnome-extensions enable "$UUID" 2>/dev/null; then
-    say "Done! Glyph Screensaver is installed and enabled."
-else
+# GNOME Shell only loads new extension code at login. If the extension isn't loaded yet, enabling
+# fails, so add it to the enabled list directly and it starts with the next session.
+if ! gnome-extensions enable "$UUID" 2>/dev/null; then
     current="$(gsettings get org.gnome.shell enabled-extensions)"
     updated="$(python3 -c '
 import ast, sys
@@ -81,8 +94,8 @@ if uuid not in lst:
 print(str(lst))
 ' "$current" "$UUID")"
     gsettings set org.gnome.shell enabled-extensions "$updated"
-    say "Done! Log out and back in to start Glyph Screensaver."
 fi
+say "Done! Log out and back in to load Glyph Screensaver $NEW."
 
 if [[ "$(gsettings get org.gnome.shell disable-user-extensions 2>/dev/null)" == "true" ]]; then
     echo "Note: user extensions are switched off globally. Turn them on in Extension Manager or the Extensions app."
